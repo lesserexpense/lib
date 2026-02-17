@@ -95,6 +95,9 @@ local function IsPrimaryInput(Input)
     return InputType == Enum.UserInputType.MouseButton1 or InputType == Enum.UserInputType.Touch
 end
 
+local TOUCH_TAP_MAX_DISTANCE = 10
+local TOUCH_TAP_MAX_TIME = 0.35
+
 local function GetInputPosition(Input)
     if Input and Input.Position then
         return Input.Position
@@ -176,6 +179,75 @@ local function TrackInputMovement(StartInput, OnMove, OnEnd)
     end)
 end
 
+local function TriggerPrimaryAction(Input, Callback, MaxDistance, MaxTime)
+    if not IsPrimaryInput(Input) then
+        return
+    end
+
+    if Input.UserInputType ~= Enum.UserInputType.Touch then
+        Callback(Input)
+        return
+    end
+
+    local StartPosition = GetInputPosition(Input)
+    local StartTick = tick()
+    local DistanceLimit = MaxDistance or TOUCH_TAP_MAX_DISTANCE
+    local TimeLimit = MaxTime or TOUCH_TAP_MAX_TIME
+
+    local ChangedConnection
+    local EndConnection
+
+    local function Cleanup()
+        if ChangedConnection then
+            ChangedConnection:Disconnect()
+            ChangedConnection = nil
+        end
+
+        if EndConnection then
+            EndConnection:Disconnect()
+            EndConnection = nil
+        end
+    end
+
+    ChangedConnection = Input.Changed:Connect(function()
+        if Input.UserInputState == Enum.UserInputState.Cancel then
+            Cleanup()
+        end
+    end)
+
+    EndConnection = InputService.InputEnded:Connect(function(EndedInput)
+        if EndedInput ~= Input then
+            return
+        end
+
+        local EndPosition = GetInputPosition(EndedInput)
+        local Distance = (EndPosition - StartPosition).Magnitude
+        local Elapsed = tick() - StartTick
+
+        Cleanup()
+
+        if Distance <= DistanceLimit and Elapsed <= TimeLimit then
+            Callback(EndedInput)
+        end
+    end)
+end
+
+local function GetEffectiveScale(Object)
+    local Scale = 1
+    local Current = Object
+
+    while Current do
+        local UiScale = Current:FindFirstChildOfClass('UIScale')
+        if UiScale then
+            Scale = Scale * UiScale.Scale
+        end
+
+        Current = Current.Parent
+    end
+
+    return Scale
+end
+
 function Library:SafeCallback(f, ...)
     if (not f) then
         return;
@@ -250,21 +322,6 @@ end;
 function Library:MakeDraggable(Instance, Cutoff)
     Instance.Active = true;
 
-    local Dragging = false;
-    local DragInput = nil;
-    local DragStart = nil;
-    local StartPos = nil;
-
-    local function UpdateDrag(Input)
-        local Delta = Input.Position - DragStart;
-        Instance.Position = UDim2.new(
-            StartPos.X.Scale,
-            StartPos.X.Offset + Delta.X,
-            StartPos.Y.Scale,
-            StartPos.Y.Offset + Delta.Y
-        );
-    end;
-
     Instance.InputBegan:Connect(function(Input)
         local IsMouse = Input.UserInputType == Enum.UserInputType.MouseButton1;
         local IsTouch = Input.UserInputType == Enum.UserInputType.Touch;
@@ -277,36 +334,39 @@ function Library:MakeDraggable(Instance, Cutoff)
             return;
         end;
 
-        Dragging = true;
-        DragInput = Input;
-        DragStart = Input.Position;
-        StartPos = Instance.Position;
+        local DragStart = GetInputPosition(Input);
+        local StartPos = Instance.Position;
+        local Activated = not IsTouch;
+        local Cancelled = false;
 
-        local EndConnection;
-        EndConnection = Input.Changed:Connect(function()
-            if Input.UserInputState == Enum.UserInputState.End then
-                Dragging = false;
-                DragInput = nil;
+        TrackInputMovement(Input, function(Position)
+            if IsTouch and not Activated then
+                local Delta = Position - DragStart;
+                local AbsX = math.abs(Delta.X);
+                local AbsY = math.abs(Delta.Y);
 
-                if EndConnection then
-                    EndConnection:Disconnect();
-                    EndConnection = nil;
+                if AbsX < 4 and AbsY < 4 then
+                    return;
                 end;
+
+                Activated = true;
             end;
-        end);
-    end);
 
-    Instance.InputChanged:Connect(function(Input)
-        if Input.UserInputType == Enum.UserInputType.MouseMovement or Input.UserInputType == Enum.UserInputType.Touch then
-            DragInput = Input;
-        end;
-    end);
+            if Cancelled then
+                return;
+            end;
 
-    Library:GiveSignal(InputService.InputChanged:Connect(function(Input)
-        if Dragging and Input == DragInput then
-            UpdateDrag(Input);
-        end;
-    end));
+            local Delta = Position - DragStart;
+            Instance.Position = UDim2.new(
+                StartPos.X.Scale,
+                StartPos.X.Offset + Delta.X,
+                StartPos.Y.Scale,
+                StartPos.Y.Offset + Delta.Y
+            );
+        end, function()
+            Cancelled = true;
+        end)
+    end);
 end;
 
 function Library:AddToolTip(InfoStr, HoverInstance)
@@ -885,11 +945,9 @@ do
                 );
 
                 Button.InputBegan:Connect(function(Input)
-                    if not IsPrimaryInput(Input) then
-                        return
-                    end
-
-                    Callback()
+                    TriggerPrimaryAction(Input, function()
+                        Callback()
+                    end)
                 end)
             end
 
@@ -1062,14 +1120,20 @@ do
         end);
 
         DisplayFrame.InputBegan:Connect(function(Input)
-            if IsPrimaryInput(Input) and not Library:MouseIsOverOpenedFrame(Input) then
+            TriggerPrimaryAction(Input, function(TapInput)
+                if Library:MouseIsOverOpenedFrame(TapInput) then
+                    return
+                end
+
                 if PickerFrameOuter.Visible then
                     ColorPicker:Hide()
                 else
                     ContextMenu:Hide()
                     ColorPicker:Show()
-                end;
-            elseif Input.UserInputType == Enum.UserInputType.MouseButton2 and not Library:MouseIsOverOpenedFrame(Input) then
+                end
+            end)
+
+            if Input.UserInputType == Enum.UserInputType.MouseButton2 and not Library:MouseIsOverOpenedFrame(Input) then
                 ContextMenu:Show()
                 ColorPicker:Hide()
             end
@@ -1257,10 +1321,10 @@ do
             end;
 
             Label.InputBegan:Connect(function(Input)
-                if IsPrimaryInput(Input) then
+                TriggerPrimaryAction(Input, function()
                     ModeButton:Select();
                     Library:AttemptSave();
-                end;
+                end)
             end);
 
             if Mode == KeyPicker.Mode then
@@ -1355,7 +1419,11 @@ do
         local Picking = false;
 
         PickOuter.InputBegan:Connect(function(Input)
-            if IsPrimaryInput(Input) and not Library:MouseIsOverOpenedFrame(Input) then
+            TriggerPrimaryAction(Input, function(TapInput)
+                if Library:MouseIsOverOpenedFrame(TapInput) then
+                    return
+                end
+
                 Picking = true;
 
                 DisplayLabel.Text = '';
@@ -1409,9 +1477,11 @@ do
 
                     Event:Disconnect();
                 end);
-            elseif Input.UserInputType == Enum.UserInputType.MouseButton2 and not Library:MouseIsOverOpenedFrame(Input) then
+            end)
+
+            if Input.UserInputType == Enum.UserInputType.MouseButton2 and not Library:MouseIsOverOpenedFrame(Input) then
                 ModeSelectOuter.Visible = true;
-            end;
+            end
         end);
 
         Library:GiveSignal(InputService.InputBegan:Connect(function(Input)
@@ -1643,34 +1713,36 @@ do
             end
 
             Button.Outer.InputBegan:Connect(function(Input)
-                if not ValidateClick(Input) then return end
-                if Button.Locked then return end
+                TriggerPrimaryAction(Input, function(TapInput)
+                    if not ValidateClick(TapInput) then return end
+                    if Button.Locked then return end
 
-                if Button.DoubleClick then
-                    Library:RemoveFromRegistry(Button.Label)
-                    Library:AddToRegistry(Button.Label, { TextColor3 = 'AccentColor' })
+                    if Button.DoubleClick then
+                        Library:RemoveFromRegistry(Button.Label)
+                        Library:AddToRegistry(Button.Label, { TextColor3 = 'AccentColor' })
 
-                    Button.Label.TextColor3 = Library.AccentColor
-                    Button.Label.Text = 'Are you sure?'
-                    Button.Locked = true
+                        Button.Label.TextColor3 = Library.AccentColor
+                        Button.Label.Text = 'Are you sure?'
+                        Button.Locked = true
 
-                    local clicked = WaitForEvent(Button.Outer.InputBegan, 0.5, ValidateClick)
+                        local clicked = WaitForEvent(Button.Outer.InputBegan, 0.5, ValidateClick)
 
-                    Library:RemoveFromRegistry(Button.Label)
-                    Library:AddToRegistry(Button.Label, { TextColor3 = 'FontColor' })
+                        Library:RemoveFromRegistry(Button.Label)
+                        Library:AddToRegistry(Button.Label, { TextColor3 = 'FontColor' })
 
-                    Button.Label.TextColor3 = Library.FontColor
-                    Button.Label.Text = Button.Text
-                    task.defer(rawset, Button, 'Locked', false)
+                        Button.Label.TextColor3 = Library.FontColor
+                        Button.Label.Text = Button.Text
+                        task.defer(rawset, Button, 'Locked', false)
 
-                    if clicked then
-                        Library:SafeCallback(Button.Func)
+                        if clicked then
+                            Library:SafeCallback(Button.Func)
+                        end
+
+                        return
                     end
 
-                    return
-                end
-
-                Library:SafeCallback(Button.Func);
+                    Library:SafeCallback(Button.Func);
+                end)
             end)
         end
 
@@ -2060,10 +2132,14 @@ do
         end;
 
         ToggleRegion.InputBegan:Connect(function(Input)
-            if IsPrimaryInput(Input) and not Library:MouseIsOverOpenedFrame(Input) then
+            TriggerPrimaryAction(Input, function(TapInput)
+                if Library:MouseIsOverOpenedFrame(TapInput) then
+                    return
+                end
+
                 Toggle:SetValue(not Toggle.Value) -- Why was it not like this from the start?
                 Library:AttemptSave();
-            end;
+            end)
         end);
 
         if Toggle.Risky then
@@ -2251,8 +2327,12 @@ do
                 local mPos = Input.Position.X;
                 local gPos = Fill.Size.X.Offset;
                 local Diff = mPos - (Fill.AbsolutePosition.X + gPos);
+                local IsTouch = Input.UserInputType == Enum.UserInputType.Touch
+                local StartPosition = GetInputPosition(Input)
+                local Activated = not IsTouch
+                local Cancelled = false
 
-                TrackInputMovement(Input, function(Position)
+                local function ApplyFromPosition(Position)
                     local nMPos = Position.X;
                     local nX = math.clamp(gPos + (nMPos - mPos) + Diff, 0, Slider.MaxSize);
 
@@ -2266,8 +2346,39 @@ do
                         Library:SafeCallback(Slider.Callback, Slider.Value);
                         Library:SafeCallback(Slider.Changed, Slider.Value);
                     end;
+                end
+
+                TrackInputMovement(Input, function(Position)
+                    if IsTouch and not Activated then
+                        local Delta = Position - StartPosition
+                        local AbsX = math.abs(Delta.X)
+                        local AbsY = math.abs(Delta.Y)
+
+                        if AbsX < 5 and AbsY < 5 then
+                            return
+                        end
+
+                        if AbsY > (AbsX * 1.2) then
+                            Cancelled = true
+                            return
+                        end
+
+                        Activated = true
+                    end
+
+                    if Cancelled then
+                        return
+                    end
+
+                    ApplyFromPosition(Position)
                 end, function()
-                    Library:AttemptSave();
+                    if IsTouch and not Activated and not Cancelled then
+                        ApplyFromPosition(StartPosition)
+                    end
+
+                    if not Cancelled then
+                        Library:AttemptSave();
+                    end
                 end)
 
             end;
@@ -2398,6 +2509,9 @@ do
         end
 
         local MAX_DROPDOWN_ITEMS = 8;
+        local DropdownScale = math.clamp(GetEffectiveScale(DropdownOuter), 0.65, 1)
+        local DropdownItemHeight = math.max(13, math.floor(20 * DropdownScale + 0.5))
+        local DropdownItemTextSize = math.max(11, math.floor(14 * DropdownScale + 0.5))
 
         local ListOuter = Library:Create('Frame', {
             BackgroundColor3 = Color3.new(0, 0, 0);
@@ -2408,17 +2522,21 @@ do
         });
 
         local function RecalculateListPosition()
-            ListOuter.Position = UDim2.fromOffset(DropdownOuter.AbsolutePosition.X, DropdownOuter.AbsolutePosition.Y + DropdownOuter.Size.Y.Offset + 1);
+            ListOuter.Position = UDim2.fromOffset(DropdownOuter.AbsolutePosition.X, DropdownOuter.AbsolutePosition.Y + DropdownOuter.AbsoluteSize.Y + 1);
         end;
 
         local function RecalculateListSize(YSize)
-            ListOuter.Size = UDim2.fromOffset(DropdownOuter.AbsoluteSize.X, YSize or (MAX_DROPDOWN_ITEMS * 20 + 2))
+            ListOuter.Size = UDim2.fromOffset(DropdownOuter.AbsoluteSize.X, YSize or (MAX_DROPDOWN_ITEMS * DropdownItemHeight + 2))
         end;
 
         RecalculateListPosition();
         RecalculateListSize();
 
         DropdownOuter:GetPropertyChangedSignal('AbsolutePosition'):Connect(RecalculateListPosition);
+        DropdownOuter:GetPropertyChangedSignal('AbsoluteSize'):Connect(function()
+            RecalculateListPosition()
+            RecalculateListSize()
+        end);
 
         local ListInner = Library:Create('Frame', {
             BackgroundColor3 = Library.MainColor;
@@ -2515,7 +2633,7 @@ do
                     BackgroundColor3 = Library.MainColor;
                     BorderColor3 = Library.OutlineColor;
                     BorderMode = Enum.BorderMode.Middle;
-                    Size = UDim2.new(1, -1, 0, 20);
+                    Size = UDim2.new(1, -1, 0, DropdownItemHeight);
                     ZIndex = 23;
                     Active = true,
                     Parent = Scrolling;
@@ -2530,7 +2648,7 @@ do
                     Active = false;
                     Size = UDim2.new(1, -6, 1, 0);
                     Position = UDim2.new(0, 6, 0, 0);
-                    TextSize = 14;
+                    TextSize = DropdownItemTextSize;
                     Text = Value;
                     TextXAlignment = Enum.TextXAlignment.Left;
                     ZIndex = 25;
@@ -2562,7 +2680,7 @@ do
                 end;
 
                 ButtonLabel.InputBegan:Connect(function(Input)
-                    if IsPrimaryInput(Input) then
+                    TriggerPrimaryAction(Input, function()
                         local Try = not Selected;
 
                         if Dropdown:GetActiveValues() == 1 and (not Try) and (not Info.AllowNull) then
@@ -2597,7 +2715,7 @@ do
 
                             Library:AttemptSave();
                         end;
-                    end;
+                    end)
                 end);
 
                 Table:UpdateButton();
@@ -2606,9 +2724,9 @@ do
                 Buttons[Button] = Table;
             end;
 
-            Scrolling.CanvasSize = UDim2.fromOffset(0, (Count * 20) + 1);
+            Scrolling.CanvasSize = UDim2.fromOffset(0, (Count * DropdownItemHeight) + 1);
 
-            local Y = math.clamp(Count * 20, 0, MAX_DROPDOWN_ITEMS * 20) + 1;
+            local Y = math.clamp(Count * DropdownItemHeight, 0, MAX_DROPDOWN_ITEMS * DropdownItemHeight) + 1;
             RecalculateListSize(Y);
         end;
 
@@ -2663,13 +2781,17 @@ do
         end;
 
         DropdownOuter.InputBegan:Connect(function(Input)
-            if IsPrimaryInput(Input) and not Library:MouseIsOverOpenedFrame(Input) then
+            TriggerPrimaryAction(Input, function(TapInput)
+                if Library:MouseIsOverOpenedFrame(TapInput) then
+                    return
+                end
+
                 if ListOuter.Visible then
                     Dropdown:CloseDropdown();
                 else
                     Dropdown:OpenDropdown();
                 end;
-            end;
+            end)
         end);
 
         Library:GiveSignal(InputService.InputBegan:Connect(function(Input)
@@ -3081,10 +3203,18 @@ function Library:CreateWindow(...)
     if type(Config.Title) ~= 'string' then Config.Title = 'perk.lol' end
     if type(Config.TabPadding) ~= 'number' then Config.TabPadding = 0 end
     if type(Config.MenuFadeTime) ~= 'number' then Config.MenuFadeTime = 0.2 end
-    if type(Config.mobilesize) ~= 'number' then
-        Config.mobilesize = InputService.TouchEnabled and 0.92 or 1
+    if type(Config.MobileToggle) ~= 'boolean' then Config.MobileToggle = InputService.TouchEnabled end
+    if typeof(Config.MobileTogglePosition) ~= 'UDim2' then Config.MobileTogglePosition = UDim2.fromOffset(12, 12) end
+    if typeof(Config.MobileToggleSize) ~= 'UDim2' then Config.MobileToggleSize = UDim2.fromOffset(36, 36) end
+    if type(Config.MobileScale) ~= 'number' then
+        local LegacyMobileScale = Config.mobilesize or Config.MobileSize or Config.mobileScale
+        if type(LegacyMobileScale) == 'number' then
+            Config.MobileScale = LegacyMobileScale
+        else
+            Config.MobileScale = InputService.TouchEnabled and 0.92 or 1
+        end
     end
-    Config.mobilesize = math.clamp(Config.mobilesize, 0.65, 1)
+    Config.MobileScale = math.clamp(Config.MobileScale, 0.65, 1)
 
     if typeof(Config.Position) ~= 'UDim2' then Config.Position = UDim2.fromOffset(175, 50) end
     if typeof(Config.Size) ~= 'UDim2' then Config.Size = UDim2.fromOffset(550, 600) end
@@ -3109,9 +3239,110 @@ function Library:CreateWindow(...)
         Parent = ScreenGui;
     });
 
-    if Config.mobilesize ~= 1 then
+    if Config.MobileToggle then
+        local MobileToggleOuter = Library:Create('TextButton', {
+            Name = 'MobileToggle';
+            BackgroundColor3 = Color3.new(0, 0, 0);
+            BorderColor3 = Color3.new(0, 0, 0);
+            AutoButtonColor = false;
+            Text = '';
+            TextTransparency = 1;
+            Active = true;
+            Position = Config.MobileTogglePosition;
+            Size = Config.MobileToggleSize;
+            ZIndex = 1000;
+            Parent = ScreenGui;
+        });
+
+        local MobileToggleInner = Library:Create('Frame', {
+            BackgroundColor3 = Library.MainColor;
+            BorderColor3 = Library.OutlineColor;
+            BorderMode = Enum.BorderMode.Inset;
+            Size = UDim2.fromScale(1, 1);
+            ZIndex = 501;
+            Parent = MobileToggleOuter;
+        });
+
+        local MobileToggleAccent = Library:Create('Frame', {
+            BackgroundColor3 = Library.AccentColor;
+            BorderSizePixel = 0;
+            Size = UDim2.new(1, 0, 0, 2);
+            ZIndex = 502;
+            Parent = MobileToggleInner;
+        });
+
+        local MobileToggleIcon = Library:Create('Frame', {
+            BackgroundTransparency = 1;
+            AnchorPoint = Vector2.new(0.5, 0.5);
+            Position = UDim2.fromScale(0.5, 0.5);
+            Size = UDim2.fromOffset(16, 12);
+            ZIndex = 503;
+            Parent = MobileToggleInner;
+        });
+
+        local MobileToggleBarTop = Library:Create('Frame', {
+            BackgroundColor3 = Library.FontColor;
+            BorderSizePixel = 0;
+            Size = UDim2.fromOffset(16, 2);
+            Position = UDim2.fromOffset(0, 0);
+            ZIndex = 504;
+            Parent = MobileToggleIcon;
+        });
+
+        local MobileToggleBarMid = Library:Create('Frame', {
+            BackgroundColor3 = Library.FontColor;
+            BorderSizePixel = 0;
+            Size = UDim2.fromOffset(16, 2);
+            Position = UDim2.fromOffset(0, 5);
+            ZIndex = 504;
+            Parent = MobileToggleIcon;
+        });
+
+        local MobileToggleBarBot = Library:Create('Frame', {
+            BackgroundColor3 = Library.FontColor;
+            BorderSizePixel = 0;
+            Size = UDim2.fromOffset(16, 2);
+            Position = UDim2.fromOffset(0, 10);
+            ZIndex = 504;
+            Parent = MobileToggleIcon;
+        });
+
+        Library:AddToRegistry(MobileToggleInner, {
+            BackgroundColor3 = 'MainColor';
+            BorderColor3 = 'OutlineColor';
+        }, true);
+
+        Library:AddToRegistry(MobileToggleAccent, {
+            BackgroundColor3 = 'AccentColor';
+        }, true);
+
+        Library:AddToRegistry(MobileToggleBarTop, {
+            BackgroundColor3 = 'FontColor';
+        }, true);
+
+        Library:AddToRegistry(MobileToggleBarMid, {
+            BackgroundColor3 = 'FontColor';
+        }, true);
+
+        Library:AddToRegistry(MobileToggleBarBot, {
+            BackgroundColor3 = 'FontColor';
+        }, true);
+
+        Library:OnHighlight(MobileToggleOuter, MobileToggleOuter,
+            { BorderColor3 = 'AccentColor' },
+            { BorderColor3 = 'Black' }
+        );
+
+        MobileToggleOuter.InputBegan:Connect(function(Input)
+            TriggerPrimaryAction(Input, function()
+                task.spawn(Library.Toggle)
+            end)
+        end);
+    end
+
+    if Config.MobileScale ~= 1 then
         Library:Create('UIScale', {
-            Scale = Config.mobilesize;
+            Scale = Config.MobileScale;
             Parent = Outer;
         })
     end
@@ -3590,10 +3821,14 @@ function Library:CreateWindow(...)
                 end;
 
                 Button.InputBegan:Connect(function(Input)
-                    if IsPrimaryInput(Input) and not Library:MouseIsOverOpenedFrame(Input) then
+                    TriggerPrimaryAction(Input, function(TapInput)
+                        if Library:MouseIsOverOpenedFrame(TapInput) then
+                            return
+                        end
+
                         Tab:Show();
                         Tab:Resize();
-                    end;
+                    end)
                 end);
 
                 Tab.Container = Container;
@@ -3626,9 +3861,9 @@ function Library:CreateWindow(...)
         end;
 
         TabButton.InputBegan:Connect(function(Input)
-            if IsPrimaryInput(Input) then
+            TriggerPrimaryAction(Input, function()
                 Tab:ShowTab();
-            end;
+            end)
         end);
 
         -- This was the first tab added, so we show it by default.
