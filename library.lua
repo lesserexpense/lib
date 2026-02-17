@@ -29,7 +29,7 @@ local Library = {
 
     HudRegistry = {};
 
-      FontColor = Color3.fromRGB(236, 229, 255);
+    FontColor = Color3.fromRGB(236, 229, 255);
     MainColor = Color3.fromRGB(34, 27, 46);
     BackgroundColor = Color3.fromRGB(25, 20, 35);
     AccentColor = Color3.fromRGB(167, 114, 255);
@@ -246,6 +246,52 @@ local function GetEffectiveScale(Object)
     end
 
     return Scale
+end
+
+local function GetViewportSize()
+    local Camera = workspace.CurrentCamera
+    if Camera then
+        local ViewportSize = Camera.ViewportSize
+        if ViewportSize.X > 0 and ViewportSize.Y > 0 then
+            return ViewportSize
+        end
+    end
+
+    local GuiSize = ScreenGui.AbsoluteSize
+    if GuiSize.X > 0 and GuiSize.Y > 0 then
+        return Vector2.new(GuiSize.X, GuiSize.Y)
+    end
+
+    return Vector2.new(1920, 1080)
+end
+
+local function GetAutoMobileScale(WindowSize, MinScale, MaxScale)
+    local Viewport = GetViewportSize()
+
+    local Width = WindowSize.X.Offset
+    local Height = WindowSize.Y.Offset
+
+    if Width <= 0 or Height <= 0 then
+        return math.clamp(0.92, MinScale, MaxScale)
+    end
+
+    local HorizontalPadding = math.clamp(math.floor((Viewport.X * 0.06) + 0.5), 14, 36)
+    local VerticalPadding = math.clamp(math.floor((Viewport.Y * 0.10) + 0.5), 36, 96)
+
+    local UsableWidth = math.max(80, Viewport.X - (HorizontalPadding * 2))
+    local UsableHeight = math.max(120, Viewport.Y - VerticalPadding)
+
+    local WidthScale = UsableWidth / Width
+    local HeightScale = UsableHeight / Height
+    local RawScale = math.min(WidthScale, HeightScale)
+
+    local IsLandscape = Viewport.X > Viewport.Y
+    if IsLandscape then
+        RawScale = RawScale * 0.97
+    end
+
+    local RoundedScale = math.floor((RawScale * 100) + 0.5) / 100
+    return math.clamp(RoundedScale, MinScale, MaxScale)
 end
 
 function Library:SafeCallback(f, ...)
@@ -3206,18 +3252,36 @@ function Library:CreateWindow(...)
     if type(Config.MobileToggle) ~= 'boolean' then Config.MobileToggle = InputService.TouchEnabled end
     if typeof(Config.MobileTogglePosition) ~= 'UDim2' then Config.MobileTogglePosition = UDim2.fromOffset(12, 12) end
     if typeof(Config.MobileToggleSize) ~= 'UDim2' then Config.MobileToggleSize = UDim2.fromOffset(36, 36) end
-    if type(Config.MobileScale) ~= 'number' then
-        local LegacyMobileScale = Config.mobilesize or Config.MobileSize or Config.mobileScale
-        if type(LegacyMobileScale) == 'number' then
-            Config.MobileScale = LegacyMobileScale
-        else
-            Config.MobileScale = InputService.TouchEnabled and 0.92 or 1
-        end
-    end
-    Config.MobileScale = math.clamp(Config.MobileScale, 0.65, 1)
-
     if typeof(Config.Position) ~= 'UDim2' then Config.Position = UDim2.fromOffset(175, 50) end
     if typeof(Config.Size) ~= 'UDim2' then Config.Size = UDim2.fromOffset(550, 600) end
+
+    if type(Config.MobileMinScale) ~= 'number' then Config.MobileMinScale = 0.65 end
+    if type(Config.MobileMaxScale) ~= 'number' then Config.MobileMaxScale = 1 end
+    Config.MobileMinScale = math.clamp(Config.MobileMinScale, 0.5, 1)
+    Config.MobileMaxScale = math.clamp(math.max(Config.MobileMinScale, Config.MobileMaxScale), Config.MobileMinScale, 1.2)
+
+    local LegacyMobileScale = Config.mobilesize or Config.MobileSize or Config.mobileScale
+    local HasExplicitMobileScale = type(Config.MobileScale) == 'number' or type(LegacyMobileScale) == 'number'
+
+    if type(Config.MobileAutoScale) ~= 'boolean' then
+        Config.MobileAutoScale = InputService.TouchEnabled and not HasExplicitMobileScale
+    end
+
+    if type(Config.MobileScale) ~= 'number' then
+        if type(LegacyMobileScale) == 'number' then
+            Config.MobileScale = LegacyMobileScale
+        elseif InputService.TouchEnabled then
+            Config.MobileScale = GetAutoMobileScale(Config.Size, Config.MobileMinScale, Config.MobileMaxScale)
+        else
+            Config.MobileScale = 1
+        end
+    end
+
+    if Config.MobileAutoScale and InputService.TouchEnabled then
+        Config.MobileScale = GetAutoMobileScale(Config.Size, Config.MobileMinScale, Config.MobileMaxScale)
+    end
+
+    Config.MobileScale = math.clamp(Config.MobileScale, Config.MobileMinScale, Config.MobileMaxScale)
 
     if Config.Center then
         Config.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -3340,11 +3404,44 @@ function Library:CreateWindow(...)
         end);
     end
 
+    local WindowScale = nil
     if Config.MobileScale ~= 1 then
-        Library:Create('UIScale', {
+        WindowScale = Library:Create('UIScale', {
             Scale = Config.MobileScale;
             Parent = Outer;
         })
+    end
+
+    if Config.MobileAutoScale and InputService.TouchEnabled then
+        if not WindowScale then
+            WindowScale = Library:Create('UIScale', {
+                Scale = Config.MobileScale;
+                Parent = Outer;
+            })
+        end
+
+        local function RefreshAutoMobileScale()
+            local NewScale = GetAutoMobileScale(Config.Size, Config.MobileMinScale, Config.MobileMaxScale)
+            if math.abs(WindowScale.Scale - NewScale) > 0.005 then
+                WindowScale.Scale = NewScale
+            end
+        end
+
+        RefreshAutoMobileScale()
+
+        local function BindCameraScaleListener()
+            local Camera = workspace.CurrentCamera
+            if Camera then
+                Library:GiveSignal(Camera:GetPropertyChangedSignal('ViewportSize'):Connect(RefreshAutoMobileScale))
+            end
+        end
+
+        BindCameraScaleListener()
+        Library:GiveSignal(workspace:GetPropertyChangedSignal('CurrentCamera'):Connect(function()
+            RefreshAutoMobileScale()
+            BindCameraScaleListener()
+        end))
+        Library:GiveSignal(ScreenGui:GetPropertyChangedSignal('AbsoluteSize'):Connect(RefreshAutoMobileScale))
     end
 
     Library:MakeDraggable(Outer, 25);
