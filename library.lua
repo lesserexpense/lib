@@ -3081,6 +3081,10 @@ function Library:CreateWindow(...)
     if type(Config.Title) ~= 'string' then Config.Title = 'perk.lol' end
     if type(Config.TabPadding) ~= 'number' then Config.TabPadding = 0 end
     if type(Config.MenuFadeTime) ~= 'number' then Config.MenuFadeTime = 0.2 end
+    if type(Config.mobilesize) ~= 'number' then
+        Config.mobilesize = InputService.TouchEnabled and 0.92 or 1
+    end
+    Config.mobilesize = math.clamp(Config.mobilesize, 0.65, 1)
 
     if typeof(Config.Position) ~= 'UDim2' then Config.Position = UDim2.fromOffset(175, 50) end
     if typeof(Config.Size) ~= 'UDim2' then Config.Size = UDim2.fromOffset(550, 600) end
@@ -3104,6 +3108,13 @@ function Library:CreateWindow(...)
         ZIndex = 1;
         Parent = ScreenGui;
     });
+
+    if Config.mobilesize ~= 1 then
+        Library:Create('UIScale', {
+            Scale = Config.mobilesize;
+            Parent = Outer;
+        })
+    end
 
     Library:MakeDraggable(Outer, 25);
 
