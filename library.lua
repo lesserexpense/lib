@@ -34,7 +34,7 @@ BackgroundColor = Color3.fromRGB(15, 14, 22);
 AccentColor     = Color3.fromRGB(130, 95, 200); 
 OutlineColor    = Color3.fromRGB(40, 36, 50);   
 RiskColor       = Color3.fromRGB(220, 90, 100),
-    Black = Color3.new(0, 0, 0);
+    Black = Color3.new(0, 0, 0),
     Font = Enum.Font.Code,
 
     OpenedFrames = {};
