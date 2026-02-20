@@ -2555,7 +2555,7 @@ do
         end
 
         local MAX_DROPDOWN_ITEMS = 8;
-        local DropdownScale = math.clamp(GetEffectiveScale(DropdownOuter), 0.65, 1)
+        local DropdownScale = math.clamp(GetEffectiveScale(DropdownOuter), 0.72, 1)
         local DropdownItemHeight = math.max(13, math.floor(20 * DropdownScale + 0.5))
         local DropdownItemTextSize = math.max(11, math.floor(14 * DropdownScale + 0.5))
 
@@ -3255,7 +3255,7 @@ function Library:CreateWindow(...)
     if typeof(Config.Position) ~= 'UDim2' then Config.Position = UDim2.fromOffset(175, 50) end
     if typeof(Config.Size) ~= 'UDim2' then Config.Size = UDim2.fromOffset(550, 600) end
 
-    if type(Config.MobileMinScale) ~= 'number' then Config.MobileMinScale = 0.65 end
+    if type(Config.MobileMinScale) ~= 'number' then Config.MobileMinScale = 0.72 end
     if type(Config.MobileMaxScale) ~= 'number' then Config.MobileMaxScale = 1 end
     Config.MobileMinScale = math.clamp(Config.MobileMinScale, 0.5, 1)
     Config.MobileMaxScale = math.clamp(math.max(Config.MobileMinScale, Config.MobileMaxScale), Config.MobileMinScale, 1.2)
