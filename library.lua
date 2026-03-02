@@ -28,13 +28,14 @@ local Library = {
     RegistryMap = {};
 
     HudRegistry = {};
-FontColor       = Color3.fromRGB(228, 230, 235);
-MainColor       = Color3.fromRGB(20, 18, 30);  
-BackgroundColor = Color3.fromRGB(15, 14, 22);   
-AccentColor     = Color3.fromRGB(130, 95, 200); 
-OutlineColor    = Color3.fromRGB(40, 36, 50);   
-RiskColor       = Color3.fromRGB(220, 90, 100),
-    Black = Color3.new(0, 0, 0),
+
+   FontColor       = Color3.fromRGB(228, 230, 235)
+MainColor       = Color3.fromRGB(20, 18, 30)   
+BackgroundColor = Color3.fromRGB(15, 14, 22)  
+AccentColor     = Color3.fromRGB(130, 95, 200) 
+OutlineColor    = Color3.fromRGB(40, 36, 50)   
+RiskColor       = Color3.fromRGB(220, 90, 100) 
+    Black = Color3.new(0, 0, 0);
     Font = Enum.Font.Code,
 
     OpenedFrames = {};
@@ -95,6 +96,7 @@ end
 
 local TOUCH_TAP_MAX_DISTANCE = 10
 local TOUCH_TAP_MAX_TIME = 0.35
+local TOUCH_SLIDER_DRAG_THRESHOLD = 12
 
 local function GetInputPosition(Input)
     if Input and Input.Position then
@@ -116,7 +118,7 @@ local function TrackInputMovement(StartInput, OnMove, OnEnd)
     local InputChangedConnection
     local InputEndedConnection
 
-    local function Stop()
+    local function Stop(EndInput)
         if Ended then
             return
         end
@@ -139,7 +141,7 @@ local function TrackInputMovement(StartInput, OnMove, OnEnd)
         end
 
         if OnEnd then
-            OnEnd()
+            OnEnd(EndInput or ActiveInput)
         end
     end
 
@@ -147,7 +149,7 @@ local function TrackInputMovement(StartInput, OnMove, OnEnd)
 
     ChangedConnection = ActiveInput.Changed:Connect(function()
         if ActiveInput.UserInputState == Enum.UserInputState.End or ActiveInput.UserInputState == Enum.UserInputState.Cancel then
-            Stop()
+            Stop(ActiveInput)
         end
     end)
 
@@ -167,12 +169,12 @@ local function TrackInputMovement(StartInput, OnMove, OnEnd)
 
     InputEndedConnection = InputService.InputEnded:Connect(function(Input)
         if Input == ActiveInput then
-            Stop()
+            Stop(Input)
             return
         end
 
         if ActiveInput.UserInputType == Enum.UserInputType.MouseButton1 and Input.UserInputType == Enum.UserInputType.MouseButton1 then
-            Stop()
+            Stop(Input)
         end
     end)
 end
@@ -1484,11 +1486,11 @@ do
                         Text = Text .. '.';
                         DisplayLabel.Text = Text;
 
-                        task.wait(0.4);
+                        wait(0.4);
                     end;
                 end);
 
-                task.wait(0.2);
+                wait(0.2);
 
                 local Event;
                 Event = InputService.InputBegan:Connect(function(Input)
@@ -2373,6 +2375,7 @@ do
                 local Diff = mPos - (Fill.AbsolutePosition.X + gPos);
                 local IsTouch = Input.UserInputType == Enum.UserInputType.Touch
                 local StartPosition = GetInputPosition(Input)
+                local StartTick = tick()
                 local Activated = not IsTouch
                 local Cancelled = false
 
@@ -2398,11 +2401,11 @@ do
                         local AbsX = math.abs(Delta.X)
                         local AbsY = math.abs(Delta.Y)
 
-                        if AbsX < 5 and AbsY < 5 then
+                        if AbsX < TOUCH_SLIDER_DRAG_THRESHOLD and AbsY < TOUCH_SLIDER_DRAG_THRESHOLD then
                             return
                         end
 
-                        if AbsY > (AbsX * 1.2) then
+                        if AbsY >= AbsX then
                             Cancelled = true
                             return
                         end
@@ -2415,9 +2418,17 @@ do
                     end
 
                     ApplyFromPosition(Position)
-                end, function()
+                end, function(EndInput)
                     if IsTouch and not Activated and not Cancelled then
-                        ApplyFromPosition(StartPosition)
+                        local EndPosition = GetInputPosition(EndInput)
+                        local Distance = (EndPosition - StartPosition).Magnitude
+                        local Elapsed = tick() - StartTick
+
+                        if Distance <= TOUCH_TAP_MAX_DISTANCE and Elapsed <= TOUCH_TAP_MAX_TIME then
+                            ApplyFromPosition(EndPosition)
+                        else
+                            Cancelled = true
+                        end
                     end
 
                     if not Cancelled then
@@ -3223,11 +3234,11 @@ function Library:Notify(Text, Time)
     pcall(NotifyOuter.TweenSize, NotifyOuter, UDim2.new(0, XSize + 8 + 4, 0, YSize), 'Out', 'Quad', 0.4, true);
 
     task.spawn(function()
-        task.wait(Time or 5);
+        wait(Time or 5);
 
         pcall(NotifyOuter.TweenSize, NotifyOuter, UDim2.new(0, 0, 0, YSize), 'Out', 'Quad', 0.4, true);
 
-        task.wait(0.4);
+        wait(0.4);
 
         NotifyOuter:Destroy();
     end);
