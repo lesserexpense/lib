@@ -5,7 +5,7 @@ local function ExtractFileName(path)
 end
 
 local SaveManager = {} do
-	SaveManager.Folder = 'perk.lol'
+	SaveManager.Folder = 'Singularity'
 	SaveManager.Ignore = {}
 	SaveManager.Parser = {
 		Toggle = {
