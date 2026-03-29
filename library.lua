@@ -28,16 +28,14 @@ local Library = {
     RegistryMap = {};
 
     HudRegistry = {};
-
-  FontColor       = Color3.fromRGB(45, 48, 58);
-MainColor       = Color3.fromRGB(245, 245, 250);
-BackgroundColor = Color3.fromRGB(255, 255, 255);
-AccentColor     = Color3.fromRGB(100, 160, 220);
-OutlineColor    = Color3.fromRGB(200, 200, 210);
-RiskColor       = Color3.fromRGB(230, 80, 80);
-Black           = Color3.new(0, 0, 0);
-Font            = Enum.Font.SourceSans;
-
+FontColor       = Color3.fromRGB(180, 180, 180);
+MainColor       = Color3.fromRGB(35, 35, 35);  
+BackgroundColor = Color3.fromRGB(25, 25, 25);  
+AccentColor     = Color3.fromRGB(229, 152, 51); 
+OutlineColor    = Color3.fromRGB(55, 55, 55);   
+RiskColor       = Color3.fromRGB(255, 70, 70);  
+Black           = Color3.new(0, 0, 0);          
+Font            = Enum.Font.Code;         
     OpenedFrames = {};
     DependencyBoxes = {};
 
