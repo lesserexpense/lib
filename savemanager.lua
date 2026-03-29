@@ -5,7 +5,7 @@ local function ExtractFileName(path)
 end
 
 local SaveManager = {} do
-	SaveManager.Folder = 'Singularity'
+	SaveManager.Folder = 'moblinoria'
 	SaveManager.Ignore = {}
 	SaveManager.Parser = {
 		Toggle = {
